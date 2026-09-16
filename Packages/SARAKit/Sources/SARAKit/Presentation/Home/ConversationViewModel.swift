@@ -91,6 +91,8 @@ public final class ConversationViewModel {
     }
     /// Whether a hands-free session is currently running.
     public var isHandsFreeActive: Bool { voiceSessionMode.isActive }
+    /// The persisted choice to begin wake-word listening on launch.
+    public var autoStartHandsFree: Bool { preferences.autoStartHandsFree }
     /// The configured wake phrase, for display in the UI.
     public var wakePhrase: String { configuration.wakeWord }
 
@@ -282,6 +284,21 @@ public final class ConversationViewModel {
     }
 
     // MARK: - Hands-free session
+
+    /// Turns hands-free on or off and remembers the choice, so a user who opts in
+    /// once gets wake-word listening automatically on the next launch — and a
+    /// user who opts out is not listened to at all.
+    public func setHandsFree(_ enabled: Bool) {
+        preferences.autoStartHandsFree = enabled
+        persistPreferences()
+        if enabled { startHandsFree() } else { stopHandsFree() }
+    }
+
+    private func persistPreferences() {
+        guard let memory else { return }
+        let updated = preferences
+        Task { try? await memory.savePreferences(updated) }
+    }
 
     /// Starts a hands-free session: SARA waits for the wake word, then runs the
     /// whole listen -> process -> answer -> follow-up loop without any button.

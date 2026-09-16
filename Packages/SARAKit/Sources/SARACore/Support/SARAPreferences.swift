@@ -20,6 +20,10 @@ public struct SARAPreferences: Hashable, Sendable, Codable {
     public var openEndedSearchDaysForward: Int
     /// Whether SARA speaks its answers aloud. Voice input is unaffected.
     public var speaksResponses: Bool
+    /// Whether SARA starts listening for the wake word as soon as the app opens.
+    /// Off by default: the microphone is held only once the user has opted in,
+    /// either here or by turning on the hands-free toggle (which remembers it).
+    public var autoStartHandsFree: Bool
 
     public init(
         temporal: TemporalPreferences = .default,
@@ -29,7 +33,8 @@ public struct SARAPreferences: Hashable, Sendable, Codable {
         preferredReminderListName: String? = nil,
         openEndedSearchDaysBack: Int = 1,
         openEndedSearchDaysForward: Int = 60,
-        speaksResponses: Bool = true
+        speaksResponses: Bool = true,
+        autoStartHandsFree: Bool = false
     ) {
         self.temporal = temporal
         self.defaultEventAlertMinutes = defaultEventAlertMinutes
@@ -39,6 +44,7 @@ public struct SARAPreferences: Hashable, Sendable, Codable {
         self.openEndedSearchDaysBack = openEndedSearchDaysBack
         self.openEndedSearchDaysForward = openEndedSearchDaysForward
         self.speaksResponses = speaksResponses
+        self.autoStartHandsFree = autoStartHandsFree
     }
 
     public static let `default` = SARAPreferences()
@@ -61,5 +67,7 @@ public struct SARAPreferences: Hashable, Sendable, Codable {
             ?? fallback.openEndedSearchDaysForward
         speaksResponses = try container.decodeIfPresent(Bool.self, forKey: .speaksResponses)
             ?? fallback.speaksResponses
+        autoStartHandsFree = try container.decodeIfPresent(Bool.self, forKey: .autoStartHandsFree)
+            ?? fallback.autoStartHandsFree
     }
 }

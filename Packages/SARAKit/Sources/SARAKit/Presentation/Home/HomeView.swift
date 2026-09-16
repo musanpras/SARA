@@ -21,10 +21,12 @@ public struct HomeView: View {
         }
         .preferredColorScheme(.dark)
         .task {
-            // Start listening for the wake word as soon as the screen appears, so
-            // "Hey SARA" works without first hunting for a toggle. Still local,
-            // still only while the app is open, and the toggle turns it off.
-            if viewModel.supportsHandsFree, !viewModel.isHandsFreeActive {
+            // Begin wake-word listening on launch only if the user opted in.
+            // Off by default: the microphone is never held until they turn on
+            // hands-free, which persists the choice for next time.
+            if viewModel.supportsHandsFree,
+               viewModel.autoStartHandsFree,
+               !viewModel.isHandsFreeActive {
                 viewModel.startHandsFree()
             }
         }
@@ -41,11 +43,7 @@ public struct HomeView: View {
 
             if viewModel.supportsHandsFree {
                 Button {
-                    if viewModel.isHandsFreeActive {
-                        viewModel.stopHandsFree()
-                    } else {
-                        viewModel.startHandsFree()
-                    }
+                    viewModel.setHandsFree(!viewModel.isHandsFreeActive)
                 } label: {
                     Image(systemName: viewModel.isHandsFreeActive ? "waveform.circle.fill" : "waveform.circle")
                         .font(.system(size: 16, weight: .medium))
