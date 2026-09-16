@@ -343,6 +343,9 @@ public final class ConversationViewModel {
         switch event {
         case .detected(let trailingCommand):
             wakeTask = nil
+            // Fully release the wake engine before opening the command mic; they
+            // share the audio session, so starting one over the other can throw.
+            await wakeWord?.stop()
             if let trailingCommand, !trailingCommand.isEmpty {
                 // The user ran the command into the wake phrase ("Hey SARA,
                 // what's next?"): use those words instead of re-opening the mic.

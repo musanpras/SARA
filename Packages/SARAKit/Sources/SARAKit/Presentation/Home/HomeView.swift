@@ -20,6 +20,14 @@ public struct HomeView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .task {
+            // Start listening for the wake word as soon as the screen appears, so
+            // "Hey SARA" works without first hunting for a toggle. Still local,
+            // still only while the app is open, and the toggle turns it off.
+            if viewModel.supportsHandsFree, !viewModel.isHandsFreeActive {
+                viewModel.startHandsFree()
+            }
+        }
     }
 
     private var header: some View {

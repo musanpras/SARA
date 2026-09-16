@@ -23,10 +23,21 @@ struct WakeWordTests {
         #expect(matcher.match(in: "Hey SARA")?.trailingCommand == nil)
     }
 
+    @Test("Common mis-hearings of the name still trigger")
+    func fuzzyName() {
+        // Apple's recogniser writes "SARA" all sorts of ways.
+        #expect(matcher.match(in: "Hey Sarah") != nil)
+        #expect(matcher.match(in: "hey sara") != nil)
+        #expect(matcher.match(in: "Hey Zara") != nil)
+        #expect(matcher.match(in: "Hey Sarah, delete gym")?.trailingCommand == "delete gym")
+    }
+
     @Test("Text without the phrase does not match")
     func noMatch() {
         #expect(matcher.match(in: "schedule gym tomorrow") == nil)
         #expect(matcher.match(in: "hey there") == nil)
+        // The leading word still has to be right — a lone near-name is not enough.
+        #expect(matcher.match(in: "the sarah movie") == nil)
     }
 
     @Test("Stripping removes a leaked wake phrase so the pipeline never sees it")

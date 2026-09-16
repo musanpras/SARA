@@ -48,6 +48,11 @@ public struct WakeWordMatcher: Sendable {
 
     /// Detects the wake phrase anywhere in `transcript`. When found, returns the
     /// remainder after the phrase as `trailingCommand` (nil if empty).
+    ///
+    /// Leading words ("hey") must match exactly, but the name is matched
+    /// loosely: Apple's recogniser routinely writes "SARA" as "Sarah", "Sara"
+    /// or "Zara", and a wake word that only fires on a perfect transcription is
+    /// a wake word that mostly does not fire.
     public func match(in transcript: String) -> Match? {
         let words = Self.normalize(transcript)
         guard !tokens.isEmpty, words.count >= tokens.count else { return nil }
@@ -57,7 +62,7 @@ public struct WakeWordMatcher: Sendable {
         var foundEnd: Int?
         var index = 0
         while index + tokens.count <= words.count {
-            if Array(words[index..<index + tokens.count]) == tokens {
+            if windowMatches(words, startingAt: index) {
                 foundEnd = index + tokens.count
             }
             index += 1
@@ -66,6 +71,57 @@ public struct WakeWordMatcher: Sendable {
 
         let trailing = words[end...].joined(separator: " ")
         return Match(trailingCommand: trailing.isEmpty ? nil : trailing)
+    }
+
+    /// True when the window of `words` at `start` is the wake phrase: every word
+    /// but the last exactly, and the last a near-miss of the name.
+    private func windowMatches(_ words: [String], startingAt start: Int) -> Bool {
+        for offset in 0..<tokens.count {
+            let word = words[start + offset]
+            let token = tokens[offset]
+            let isName = offset == tokens.count - 1
+            if isName {
+                if !Self.nameMatches(word, token) { return false }
+            } else if word != token {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Whether a heard word is close enough to the expected name token.
+    ///
+    /// Accepts an exact hit, one that starts with the name (its plural or
+    /// possessive), or one within a single edit — enough to cover the common
+    /// mis-hearings of a short name without matching unrelated words.
+    static func nameMatches(_ word: String, _ name: String) -> Bool {
+        if word == name { return true }
+        if name.count >= 4, word.hasPrefix(name) { return true }
+        if name.count >= 3, word.hasPrefix(name.prefix(name.count - 1)),
+           abs(word.count - name.count) <= 1 { return true }
+        return levenshtein(word, name) <= 1
+    }
+
+    /// Classic edit distance, small inputs only (single words).
+    static func levenshtein(_ a: String, _ b: String) -> Int {
+        let x = Array(a), y = Array(b)
+        if x.isEmpty { return y.count }
+        if y.isEmpty { return x.count }
+        var previous = Array(0...y.count)
+        var current = [Int](repeating: 0, count: y.count + 1)
+        for i in 1...x.count {
+            current[0] = i
+            for j in 1...y.count {
+                let cost = x[i - 1] == y[j - 1] ? 0 : 1
+                current[j] = Swift.min(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + cost
+                )
+            }
+            swap(&previous, &current)
+        }
+        return previous[y.count]
     }
 
     /// Removes a leading wake phrase from a command transcript, if present.
