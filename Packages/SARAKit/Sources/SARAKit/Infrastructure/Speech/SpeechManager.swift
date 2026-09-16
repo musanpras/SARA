@@ -256,9 +256,25 @@ public actor SpeechManager: SpeechRecognizing {
         endpointed: Bool
     ) throws {
         let input = audioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        // A fresh reset clears any input format left bound from a previous
+        // session — notably after text-to-speech ran the session in `.playback`
+        // at a different sample rate.
+        audioEngine.reset()
+
+        // `installTap` throws an *NSException* on a format mismatch, which Swift
+        // cannot catch, so the format is validated first (a dead route reports
+        // zero here) and then the tap adopts the node's own format by passing
+        // `nil` — there is nothing to mismatch against.
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw NSError(
+                domain: "SpeechManager",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "The microphone is not available right now."]
+            )
+        }
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
             request.append(buffer)
             // Voice-activity detection runs off the same buffers that feed the
             // recogniser, so end-of-speech is measured on the real audio rather

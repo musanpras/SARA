@@ -131,9 +131,23 @@ public actor SpeechWakeWordDetector: WakeWordDetecting {
 
     private func startEngine(feeding request: SFSpeechAudioBufferRecognitionRequest) throws {
         let input = audioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+        // Clear any input format bound from a prior session (e.g. after speech
+        // playback changed the sample rate), then validate before tapping —
+        // `installTap` raises an uncatchable NSException on a format mismatch.
+        audioEngine.reset()
+
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw NSError(
+                domain: "SpeechWakeWordDetector",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "The microphone is not available right now."]
+            )
+        }
+        // Passing nil adopts the node's own format, so there is nothing to
+        // mismatch against.
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
             request.append(buffer)
         }
         audioEngine.prepare()
