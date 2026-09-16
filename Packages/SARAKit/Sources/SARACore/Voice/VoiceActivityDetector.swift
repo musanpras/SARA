@@ -111,7 +111,10 @@ public struct VoiceActivityDetector: Sendable {
 
     private mutating func seedOrAdaptNoiseFloor(with level: Float) {
         guard hasSeededNoiseFloor else {
-            noiseFloor = level
+            // Cap the seed low: if the user starts talking on the very first
+            // buffer, the floor must still represent quiet, or onset would sit
+            // above their voice and speech would never register.
+            noiseFloor = Swift.min(level, 0.01)
             hasSeededNoiseFloor = true
             return
         }

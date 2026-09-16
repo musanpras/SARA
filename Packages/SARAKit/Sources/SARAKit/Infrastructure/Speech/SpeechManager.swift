@@ -27,6 +27,19 @@ public actor SpeechManager: SpeechRecognizing {
     /// the request is only ended once.
     private var didRequestEnd = false
 
+    /// Endpointing on the recogniser's own output, as a robust complement to the
+    /// amplitude VAD: once there is a transcript that has stopped changing for
+    /// `endpointSilence`, the utterance is finished even if the microphone's RMS
+    /// never crossed the VAD thresholds on this device. Nil for push-to-talk with
+    /// no endpointing requested... though the button path now requests it too.
+    private var endpointSilence: TimeInterval?
+    private var lastPartialText = ""
+    private var lastPartialAt: TimeInterval?
+
+    private static func monotonicNow() -> TimeInterval {
+        Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+    }
+
     /// Token for the audio-interruption observer, removed when the manager goes
     /// away. `nonisolated(unsafe)` only because the token is written once from
     /// the actor and read once in the nonisolated deinit; it is never raced.
@@ -152,6 +165,9 @@ public actor SpeechManager: SpeechRecognizing {
         didDeliverFinalResult = false
         didRequestEnd = false
         detector = endpointing.map { VoiceActivityDetector(configuration: $0.detection) }
+        endpointSilence = endpointing?.detection.endOfSpeechSilenceDuration
+        lastPartialText = ""
+        lastPartialAt = nil
 
         if case .failure(let error) = await requestAccess() {
             finish(with: .failed(error))
@@ -219,6 +235,14 @@ public actor SpeechManager: SpeechRecognizing {
                 return
             }
             continuation?.yield(.partialTranscript(update.text))
+
+            // Note when the transcript last grew, so endpointing can finalise
+            // once the recogniser has been quiet for the silence window.
+            let trimmed = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, trimmed != lastPartialText {
+                lastPartialText = trimmed
+                lastPartialAt = Self.monotonicNow()
+            }
         }
 
         guard let errorMessage else { return }
@@ -297,6 +321,17 @@ public actor SpeechManager: SpeechRecognizing {
         let event = detector!.process(level: level, at: time)
         if event == .endOfUtterance {
             endDueToEndpoint()
+            return
+        }
+
+        // Recogniser-driven endpointing: if we already have a transcript and it
+        // has stopped changing for the silence window, end now. This carries the
+        // common case even when device gain keeps RMS below the VAD thresholds.
+        if let silence = endpointSilence,
+           !lastPartialText.isEmpty,
+           let last = lastPartialAt,
+           time - last >= silence {
+            endDueToEndpoint()
         }
     }
 
@@ -352,6 +387,9 @@ public actor SpeechManager: SpeechRecognizing {
         timeoutTask?.cancel()
         timeoutTask = nil
         detector = nil
+        endpointSilence = nil
+        lastPartialText = ""
+        lastPartialAt = nil
         teardownAudio()
     }
 

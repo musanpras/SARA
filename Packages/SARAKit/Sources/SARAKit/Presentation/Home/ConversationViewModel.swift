@@ -149,7 +149,10 @@ public final class ConversationViewModel {
     // MARK: - Push to talk
 
     public func beginListening() {
-        startCapture(endpointing: nil)
+        // Endpointed so the capture also ends itself on silence: the user can
+        // tap, speak, and stop talking without having to release the button.
+        // Releasing still ends it too — whichever happens first.
+        startCapture(endpointing: configuration.endpointing)
     }
 
     /// Opens the microphone for a hands-free command or follow-up answer, ending

@@ -23,7 +23,7 @@ public struct VoiceConfiguration: Equatable, Sendable {
         wakeWord: String = "Hey SARA",
         wakeWordEnabled: Bool = true,
         detection: VoiceDetectionConfiguration = .default,
-        maximumListeningDuration: TimeInterval = 15
+        maximumListeningDuration: TimeInterval = 10
     ) {
         self.wakeWord = wakeWord
         self.wakeWordEnabled = wakeWordEnabled
@@ -78,10 +78,10 @@ public struct VoiceDetectionConfiguration: Equatable, Sendable {
     public var noiseFloorAdaptation: Float
 
     public init(
-        endOfSpeechSilenceDuration: TimeInterval = 1.2,
-        minimumSpeechDuration: TimeInterval = 0.3,
-        onsetThreshold: Float = 0.06,
-        releaseThreshold: Float = 0.035,
+        endOfSpeechSilenceDuration: TimeInterval = 1.0,
+        minimumSpeechDuration: TimeInterval = 0.2,
+        onsetThreshold: Float = 0.02,
+        releaseThreshold: Float = 0.012,
         noiseFloorAdaptation: Float = 0.05
     ) {
         self.endOfSpeechSilenceDuration = endOfSpeechSilenceDuration

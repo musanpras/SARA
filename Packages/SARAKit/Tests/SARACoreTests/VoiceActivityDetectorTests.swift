@@ -83,6 +83,23 @@ struct VoiceActivityDetectorTests {
         #expect(!detector.didFinish)
     }
 
+    @Test("Speaking from the very first buffer is still detected and can end")
+    func speechFromFirstBuffer() {
+        var detector = VoiceActivityDetector(configuration: config)
+        // No quiet lead-in: the user talks immediately. The floor must not seed
+        // to their voice, or onset would sit above it and nothing would register.
+        let speech = feed(&detector, level: 0.3, from: 0, count: 8)
+        #expect(speech.event == .speechStarted || speech.event == .speaking)
+
+        var ended = false
+        var time = speech.nextTime
+        for _ in 0..<20 {
+            if detector.process(level: 0.002, at: time) == .endOfUtterance { ended = true; break }
+            time += 0.1
+        }
+        #expect(ended)
+    }
+
     @Test("Continuous speech keeps reporting speaking, never ends")
     func continuousSpeech() {
         var detector = VoiceActivityDetector(configuration: config)
