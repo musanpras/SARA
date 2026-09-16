@@ -42,10 +42,25 @@ public protocol SpeechRecognizing: Sendable {
     /// Begins listening. The stream finishes after a final transcript or a
     /// failure, so a caller always learns how the turn ended.
     func startListening() async -> AsyncStream<SpeechEvent>
+    /// Begins listening with automatic end-of-speech detection.
+    ///
+    /// When `endpointing` is non-nil the recogniser watches voice activity and
+    /// settles on its own after the user stops talking — the hands-free path,
+    /// where there is no button to release. When nil it behaves like
+    /// `startListening()` and waits for `stopListening()` — the push-to-talk
+    /// path. Defaulted so existing recognisers (and test doubles) that only
+    /// implement push-to-talk keep working unchanged.
+    func startListening(endpointing: VoiceEndpointingOptions?) async -> AsyncStream<SpeechEvent>
     /// Stops the audio and asks for a final result.
     func stopListening() async
     /// Abandons the turn without producing a transcript.
     func cancelListening() async
+}
+
+public extension SpeechRecognizing {
+    func startListening(endpointing: VoiceEndpointingOptions?) async -> AsyncStream<SpeechEvent> {
+        await startListening()
+    }
 }
 
 /// Text-to-speech behind a protocol, so SARA's voice is independent of the

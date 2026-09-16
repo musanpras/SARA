@@ -71,6 +71,14 @@ public actor ConversationManager: RequestHandling {
             return await turn(SARAResponse(text: "I didn't catch that.", kind: .failure), state: .failed(message: "Empty request"))
         }
 
+        // An explicit cancellation abandons whatever question is open and
+        // returns to rest, before any attempt to read the reply as an answer.
+        if pendingClarification != nil || pendingConfirmation != nil,
+           answers.isCancellation(text) {
+            clearPending()
+            return await turn(SARAResponse(text: "Okay, I've cancelled that."), state: .idle)
+        }
+
         if let answer = await handleConfirmationReply(text, request: request, progress: progress) {
             return answer
         }

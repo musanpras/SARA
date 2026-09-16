@@ -17,8 +17,58 @@ public actor SpeechManager: SpeechRecognizing {
     private var continuation: AsyncStream<SpeechEvent>.Continuation?
     private var didDeliverFinalResult = false
 
+    /// Present only for hands-free captures. When set, buffer amplitude is fed
+    /// to it and the capture ends itself on end-of-speech; when nil the caller
+    /// ends the capture (push-to-talk).
+    private var detector: VoiceActivityDetector?
+    /// Fires the hard time limit so an open microphone cannot listen forever.
+    private var timeoutTask: Task<Void, Never>?
+    /// True once end-of-speech (or the timeout) has asked for a final result, so
+    /// the request is only ended once.
+    private var didRequestEnd = false
+
+    /// Token for the audio-interruption observer, removed when the manager goes
+    /// away. `nonisolated(unsafe)` only because the token is written once from
+    /// the actor and read once in the nonisolated deinit; it is never raced.
+    nonisolated(unsafe) private var interruptionObserver: (any NSObjectProtocol)?
+
     public init(locale: Locale = .autoupdatingCurrent) {
         self.recognizer = SFSpeechRecognizer(locale: locale) ?? SFSpeechRecognizer()
+        Task { await self.observeInterruptions() }
+    }
+
+    deinit {
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+        }
+    }
+
+    // MARK: - Interruptions
+
+    /// Ends an in-flight capture when the system takes the audio session — a
+    /// phone call, Siri, an alarm. The capture fails cleanly rather than
+    /// hanging on a dead engine; the view model surfaces the message and, in a
+    /// hands-free session, recovers by returning to the wake word.
+    private func observeInterruptions() {
+        #if os(iOS)
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            guard
+                let value = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                AVAudioSession.InterruptionType(rawValue: value) == .began
+            else { return }
+            Task { await self?.audioWasInterrupted() }
+        }
+        #endif
+    }
+
+    private func audioWasInterrupted() {
+        // Only meaningful while a capture is actually running.
+        guard continuation != nil, !didDeliverFinalResult else { return }
+        finish(with: .failed(.underlying("Audio was interrupted.")))
     }
 
     // MARK: - Authorization
@@ -85,14 +135,23 @@ public actor SpeechManager: SpeechRecognizing {
     // MARK: - Listening
 
     public func startListening() async -> AsyncStream<SpeechEvent> {
+        await startListening(endpointing: nil)
+    }
+
+    public func startListening(endpointing: VoiceEndpointingOptions?) async -> AsyncStream<SpeechEvent> {
         AsyncStream { continuation in
-            Task { await self.begin(with: continuation) }
+            Task { await self.begin(with: continuation, endpointing: endpointing) }
         }
     }
 
-    private func begin(with continuation: AsyncStream<SpeechEvent>.Continuation) async {
+    private func begin(
+        with continuation: AsyncStream<SpeechEvent>.Continuation,
+        endpointing: VoiceEndpointingOptions?
+    ) async {
         self.continuation = continuation
         didDeliverFinalResult = false
+        didRequestEnd = false
+        detector = endpointing.map { VoiceActivityDetector(configuration: $0.detection) }
 
         if case .failure(let error) = await requestAccess() {
             finish(with: .failed(error))
@@ -112,10 +171,22 @@ public actor SpeechManager: SpeechRecognizing {
 
         do {
             try configureAudioSession()
-            try startEngine(feeding: request)
+            try startEngine(feeding: request, endpointed: endpointing != nil)
         } catch {
             finish(with: .failed(.audioEngineFailed(error.localizedDescription)))
             return
+        }
+
+        // The hard ceiling. Without a button to release, a capture that never
+        // hears end-of-speech (silence, or noise the VAD keeps rejecting) still
+        // has to end; the recogniser then delivers whatever it has, or reports
+        // that it heard nothing.
+        if let endpointing {
+            timeoutTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(endpointing.maximumDuration * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                await self?.endDueToEndpoint()
+            }
         }
 
         // The recogniser's result type is not Sendable, so everything the actor
@@ -180,15 +251,63 @@ public actor SpeechManager: SpeechRecognizing {
         #endif
     }
 
-    private func startEngine(feeding request: SFSpeechAudioBufferRecognitionRequest) throws {
+    private func startEngine(
+        feeding request: SFSpeechAudioBufferRecognitionRequest,
+        endpointed: Bool
+    ) throws {
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             request.append(buffer)
+            // Voice-activity detection runs off the same buffers that feed the
+            // recogniser, so end-of-speech is measured on the real audio rather
+            // than inferred from recognition callbacks. The amplitude is a pure
+            // computation on the audio thread; only the decision hops onto the
+            // actor.
+            guard endpointed, let self else { return }
+            let level = Self.rms(of: buffer)
+            let time = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+            Task { await self.observe(level: level, at: time) }
         }
         audioEngine.prepare()
         try audioEngine.start()
+    }
+
+    /// Feeds one amplitude reading to the detector and ends the capture when it
+    /// reports the utterance is complete.
+    private func observe(level: Float, at time: TimeInterval) {
+        guard detector != nil else { return }
+        let event = detector!.process(level: level, at: time)
+        if event == .endOfUtterance {
+            endDueToEndpoint()
+        }
+    }
+
+    /// Ends the audio and asks the recogniser for a final result, exactly once,
+    /// whether the trigger was end-of-speech or the timeout.
+    private func endDueToEndpoint() {
+        guard !didRequestEnd, !didDeliverFinalResult else { return }
+        didRequestEnd = true
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        teardownAudio()
+        request?.endAudio()
+    }
+
+    /// Root-mean-square amplitude of a buffer, 0...1. The loudness measure the
+    /// VAD compares against its thresholds.
+    private static func rms(of buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData else { return 0 }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return 0 }
+        let samples = channelData[0]
+        var sum: Float = 0
+        for index in 0..<frames {
+            let sample = samples[index]
+            sum += sample * sample
+        }
+        return (sum / Float(frames)).squareRoot()
     }
 
     private func teardownAudio() {
@@ -214,6 +333,9 @@ public actor SpeechManager: SpeechRecognizing {
         continuation = nil
         task = nil
         request = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        detector = nil
         teardownAudio()
     }
 

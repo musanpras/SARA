@@ -31,6 +31,23 @@ public struct HomeView: View {
 
             Spacer()
 
+            if viewModel.supportsHandsFree {
+                Button {
+                    if viewModel.isHandsFreeActive {
+                        viewModel.stopHandsFree()
+                    } else {
+                        viewModel.startHandsFree()
+                    }
+                } label: {
+                    Image(systemName: viewModel.isHandsFreeActive ? "waveform.circle.fill" : "waveform.circle")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(viewModel.isHandsFreeActive ? SARATheme.Palette.listening : SARATheme.Palette.secondaryText)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(viewModel.isHandsFreeActive ? "Turn off hands-free" : "Turn on hands-free")
+            }
+
             Button {
                 viewModel.setSpeaksResponses(!viewModel.speaksResponses)
             } label: {
@@ -52,6 +69,15 @@ public struct HomeView: View {
         VStack(spacing: 14) {
             if case .confirming = viewModel.state {
                 confirmationActions
+            }
+
+            if let hint = handsFreeHint {
+                Text(hint)
+                    .font(SARATheme.Typography.state)
+                    .foregroundStyle(SARATheme.Palette.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .transition(.opacity)
+                    .accessibilityLabel(hint)
             }
 
             if !viewModel.liveTranscript.isEmpty {
@@ -76,6 +102,16 @@ public struct HomeView: View {
         .padding(.top, 12)
         .padding(.bottom, 8)
         .animation(.easeInOut(duration: 0.2), value: viewModel.liveTranscript.isEmpty)
+    }
+
+    /// A one-line prompt telling the user what the hands-free session expects of
+    /// them right now. Nil when there is nothing to say (or hands-free is off).
+    private var handsFreeHint: String? {
+        switch viewModel.voiceSessionMode {
+        case .waitingForWakeWord: "Say “\(viewModel.wakePhrase)”"
+        case .waitingForFollowUp: "Listening for your answer…"
+        case .off, .idle, .capturingCommand, .processing, .speaking: nil
+        }
     }
 
     /// Explicit agreement for a destructive or consequential action, one tap

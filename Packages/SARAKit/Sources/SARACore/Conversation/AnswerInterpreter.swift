@@ -15,6 +15,19 @@ struct AnswerInterpreter: Sendable {
         case unrelated
     }
 
+    /// Recognises an explicit request to abandon whatever SARA is waiting on.
+    ///
+    /// Distinct from a "no" answer: cancellation applies to any pending question
+    /// (a clarification as much as a confirmation) and always returns to rest.
+    /// End-of-speech is handled by voice-activity detection, so "stop" here can
+    /// safely mean "cancel this" rather than "stop recording".
+    func isCancellation(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: CharacterSet(charactersIn: " .,!?"))
+        return trimmed.wholeMatch(
+            of: /(cancel|never ?mind|forget it|scratch that|stop|stop it|leave it)/.ignoresCase()
+        ) != nil
+    }
+
     func agreement(in text: String) -> Agreement {
         let trimmed = text.trimmingCharacters(in: CharacterSet(charactersIn: " .,!?"))
         if trimmed.wholeMatch(of: /(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|please do|confirm|correct|that'?s right|affirmative)/.ignoresCase()) != nil {

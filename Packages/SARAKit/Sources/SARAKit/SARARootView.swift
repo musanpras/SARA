@@ -38,6 +38,8 @@ public struct SARARootView: View {
             handler: environment.conversation,
             speech: environment.speech,
             voice: environment.voice,
+            wakeWord: environment.wakeWord,
+            configuration: environment.voiceConfiguration,
             memory: environment.memory,
             preferences: environment.preferences,
             startupWarning: environment.storageWarning
